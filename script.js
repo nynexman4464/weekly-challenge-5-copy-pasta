@@ -9,7 +9,7 @@ async function handlePaste(items) {
 		for (const type of item.types) {
 			const blob = await item.getType(type);
 			// we can now use blob here
-			renderIt(type, blob);
+			await renderIt(type, blob);
 		}
 	}
 }
@@ -18,56 +18,95 @@ function handleError(err) {
 	alert("oops: " + err);
 }
 
-function renderIt(type, blob) {
+async function renderIt(type, blob) {
 	console.log(type, blob);
 	getCanvasContext(true);
-	const prefix = type.split("/");
-	switch (prefix[0]) {
+	const [prefix, suffix] = type.split("/");
+	switch (prefix) {
 		case "image":
-			renderImage(blob);
+			await renderImage(blob);
 			break;
 		case "text":
-			renderText(blob);
+			await renderText(blob, suffix);
 			break;
 		default:
 			handleError("Weird type: " + type);
 	}
 }
 
-function renderImage(blob) {
-	const ctx = getCanvasContext();
-	const img = new Image();
-	img.onload = (event) => {
-		ctx.drawImage(event.target, 0, 0);
-		// release blob after drawing
-		URL.revokeObjectURL(event.target.src);
-	};
-	img.src = URL.createObjectURL(blob);
-	ctx.translate(0, img.height);
+async function renderImage(blob) {
+	return await new Promise((resolve, reject) => {
+		const ctx = getCanvasContext();
+		const img = new Image();
+		img.onload = (event) => {
+			ctx.drawImage(event.target, 0, 0);
+			// release blob after drawing
+			URL.revokeObjectURL(event.target.src);
+			resolve();
+		};
+		img.onerror = (evt) => {
+			// release blob after error
+			URL.revokeObjectURL(event.target.src);
+			reject("couldn't render image");
+		};
+		img.src = URL.createObjectURL(blob);
+		ctx.translate(0, img.height);
+	});
 }
 
-function renderText(blob) {
-	const reader = new FileReader();
-
-	reader.addEventListener(
-		"load",
-		() => {
-			renderTextImpl(reader.result);
-		},
-		false,
-	);
-
-	reader.readAsText(blob);
-}
-
-function renderTextImpl(text) {
+async function renderText(blob, flavor) {
+	const text = await readText(blob);
 	console.log(text);
-	const ctx = getCanvasContext();
-	ctx.fillStyle = "grey";
-	const { fontBoundingBoxAscent, fontBoundingBoxDescent } =
-		ctx.measureText(text);
-	ctx.fillText(text, 0, fontBoundingBoxAscent);
-	ctx.translate(0, fontBoundingBoxAscent + fontBoundingBoxDescent);
+	let data;
+	switch (flavor) {
+		case "plain":
+			//TODO
+			break;
+		case "html":
+			const doc = document.createDocumentFragment(); //document.implementation.createHTMLDocument("");
+			const svg = document.createElementNS(
+				"http://www.w3.org/2000/svg",
+				"svg",
+			);
+			svg.setAttribute("width",500);
+			svg.setAttribute("height",500);
+			doc.appendChild(svg);
+			const elt = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+			elt.setAttribute("width","100%");
+			elt.setAttribute("height","100%");
+			svg.appendChild(elt);
+			const container = document.createElementNS(
+				"http://www.w3.org/1999/xhtml",
+				"div",
+			);
+			elt.appendChild(container);
+			container.innerHTML = text;
+
+			// You must manually set the xmlns if you intend to immediately serialize the HTML
+			// document to a string as opposed to appending it to a <foreignObject> in the DOM
+			// doc.documentElement.setAttribute(
+			// 	"xmlns",
+			// 	doc.documentElement.namespaceURI,
+			// );
+
+			// Get well-formed markup
+			data = new XMLSerializer().serializeToString(doc);
+			break;
+		default:
+			throw new Error("I don't know how to use text/" + flavor);
+	}
+	if (data == null) {
+		return;
+	}
+	const svg = new Blob([data], { type: "image/svg+xml;charset=utf-8" });
+	await renderImage(svg);
+
+	// const ctx = getCanvasContext();
+	// ctx.fillStyle = "grey";
+	// const { fontBoundingBoxAscent, fontBoundingBoxDescent } =
+	// 	ctx.measureText(text);
+	// ctx.fillText(text, 0, fontBoundingBoxAscent);
+	// ctx.translate(0, fontBoundingBoxAscent + fontBoundingBoxDescent);
 }
 
 function getCanvasContext(clear = false) {
@@ -93,4 +132,16 @@ function getCanvasContext(clear = false) {
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 	}
 	return ctx;
+}
+
+async function readText(blob) {
+	return await new Promise((resolve, reject) => {
+		const reader = new FileReader();
+
+		reader.addEventListener("load", () => resolve(reader.result), false);
+
+		reader.addEventListener("error", () => reject(reader.error), false);
+
+		reader.readAsText(blob);
+	});
 }
