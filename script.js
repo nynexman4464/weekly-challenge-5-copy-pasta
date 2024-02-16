@@ -5,6 +5,8 @@ function paste(evt) {
 
 async function handlePaste(items) {
 	console.log(items.length);
+	// reset the canvas
+	getCanvasContext(true);
 	for (const item of items) {
 		for (const type of item.types) {
 			const blob = await item.getType(type);
@@ -20,7 +22,6 @@ function handleError(err) {
 
 async function renderIt(type, blob) {
 	console.log(type, blob);
-	getCanvasContext(true);
 	const [prefix, suffix] = type.split("/");
 	switch (prefix) {
 		case "image":
@@ -39,9 +40,11 @@ async function renderImage(blob) {
 		const ctx = getCanvasContext();
 		const img = new Image();
 		img.onload = (event) => {
-			ctx.drawImage(event.target, 0, 0);
+			// ctx.strokeRect(0, 0, img.width + 2, img.height + 2);
+			ctx.drawImage(event.target, 0, 0); //1, 1);
 			// release blob after drawing
 			URL.revokeObjectURL(event.target.src);
+			ctx.translate(0, img.height);
 			resolve();
 		};
 		img.onerror = (evt) => {
@@ -50,7 +53,7 @@ async function renderImage(blob) {
 			reject("couldn't render image");
 		};
 		img.src = URL.createObjectURL(blob);
-		ctx.translate(0, img.height);
+		// document.body.appendChild(img);
 	});
 }
 
@@ -60,37 +63,21 @@ async function renderText(blob, flavor) {
 	let data;
 	switch (flavor) {
 		case "plain":
-			//TODO
+			const node = document.createElementNS(
+				"http://www.w3.org/1999/xhtml",
+				"pre",
+			);
+			node.style.whiteSpace = "pre-wrap";
+			node.innerText = text;
+			data = getAsSvgXml(node);
 			break;
 		case "html":
-			const doc = document.createDocumentFragment(); //document.implementation.createHTMLDocument("");
-			const svg = document.createElementNS(
-				"http://www.w3.org/2000/svg",
-				"svg",
-			);
-			svg.setAttribute("width",500);
-			svg.setAttribute("height",500);
-			doc.appendChild(svg);
-			const elt = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
-			elt.setAttribute("width","100%");
-			elt.setAttribute("height","100%");
-			svg.appendChild(elt);
 			const container = document.createElementNS(
 				"http://www.w3.org/1999/xhtml",
 				"div",
 			);
-			elt.appendChild(container);
 			container.innerHTML = text;
-
-			// You must manually set the xmlns if you intend to immediately serialize the HTML
-			// document to a string as opposed to appending it to a <foreignObject> in the DOM
-			// doc.documentElement.setAttribute(
-			// 	"xmlns",
-			// 	doc.documentElement.namespaceURI,
-			// );
-
-			// Get well-formed markup
-			data = new XMLSerializer().serializeToString(doc);
+			data = getAsSvgXml(container);
 			break;
 		default:
 			throw new Error("I don't know how to use text/" + flavor);
@@ -100,13 +87,6 @@ async function renderText(blob, flavor) {
 	}
 	const svg = new Blob([data], { type: "image/svg+xml;charset=utf-8" });
 	await renderImage(svg);
-
-	// const ctx = getCanvasContext();
-	// ctx.fillStyle = "grey";
-	// const { fontBoundingBoxAscent, fontBoundingBoxDescent } =
-	// 	ctx.measureText(text);
-	// ctx.fillText(text, 0, fontBoundingBoxAscent);
-	// ctx.translate(0, fontBoundingBoxAscent + fontBoundingBoxDescent);
 }
 
 function getCanvasContext(clear = false) {
@@ -144,4 +124,24 @@ async function readText(blob) {
 
 		reader.readAsText(blob);
 	});
+}
+
+function getAsSvgXml(node) {
+	const doc = document.createDocumentFragment();
+	const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+	// svg.setAttribute("width", 500);
+	// svg.setAttribute("height", 1000);
+	doc.appendChild(svg);
+	const elt = document.createElementNS(
+		"http://www.w3.org/2000/svg",
+		"foreignObject",
+	);
+	elt.setAttribute("width", "100%");
+	elt.setAttribute("height", "100%");
+	svg.appendChild(elt);
+	elt.appendChild(node);
+
+	// Get well-formed markup
+	let data = new XMLSerializer().serializeToString(doc);
+	return data;
 }
